@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>オンライン 3人コネクト4</title>
+    <style>
+        body { font-family: sans-serif; text-align: center; background-color: #2f3542; color: #fff; margin: 0; padding: 20px;}
+        .panel { background: #353b48; padding: 20px; border-radius: 8px; width: fit-content; margin: 0 auto 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.3);}
+        
+        /* ログイン画面 */
+        #login-screen { margin-top: 100px; }
+        #login-screen input, #login-screen select { padding: 10px; font-size: 16px; border-radius: 4px; border: none; width: 220px; text-align: center; margin-bottom: 15px;}
+        #login-screen select { cursor: pointer; }
+        
+        #board {
+            display: grid; grid-template-columns: repeat(9, 40px); gap: 5px;
+            background-color: #57606f; padding: 10px; border-radius: 8px; margin: 0 auto; width: fit-content;
+        }
+        .cell {
+            width: 40px; height: 40px; background-color: #dfe4ea; border-radius: 50%;
+            display: flex; align-items: center; justify-content: center; font-weight: bold; color: #333; cursor: pointer;
+            position: relative; /* アニメーション用 */
+        }
+        
+        .p1 { background-color: #ff4757; color: white; }
+        .p2 { background-color: #ffa502; color: white; }
+        .p3 { background-color: #1e90ff; color: white; }
+        .selected { border: 3px solid #00d2d3; box-sizing: border-box; } 
+
+        /* ==========================================
+           ★ブラインドモード用の特殊CSSアニメーション
+           ========================================== */
+        .blind-hidden {
+            /* 過去のディスクは完全に見えなくする */
+            background-color: transparent !important;
+            color: transparent !important;
+        }
+
+        .blind-anim {
+            /* 落下して消えるアニメーション (3秒かけて実行) */
+            animation: blindDropFade 3s cubic-bezier(0.25, 1, 0.5, 1) forwards;
+            z-index: 10;
+        }
+
+        @keyframes blindDropFade {
+            0%   { transform: translateY(-300px); opacity: 1; } /* 盤面の上空で待機 */
+            30%  { transform: translateY(-300px); opacity: 1; } /* 1秒間「誰がどこを選んだか」を見せつける */
+            60%  { transform: translateY(0); opacity: 1; }      /* 落下！ */
+            80%  { transform: translateY(0); opacity: 1; }      /* 少しだけ盤面で見せる */
+            100% { transform: translateY(0); opacity: 0; }      /* すーっと消える */
+        }
+        /* ========================================== */
+
+
+        #controls { margin-top: 20px; }
+        button { padding: 10px 20px; font-size: 16px; font-weight: bold; cursor: pointer; border-radius: 5px; border: none; background: #2ed573; color: white; transition: 0.1s;}
+        button:disabled { background: #7f8fa6; cursor: not-allowed; }
+        button:active { transform: translateY(2px); }
+        
+        .ready-status { margin-top: 10px; font-size: 0.9em; color: #a4b0be; }
+        .priority-box { margin-top: 15px; background: #2f3542; padding: 10px; border-radius: 8px; text-align: left; font-size: 0.9em; }
+        .prio-item { display: inline-block; padding: 3px 6px; border-radius: 4px; font-weight: bold; color: white; margin: 0 2px;}
+        
+        #rematch-area { margin-top: 20px; display: none; }
+        .rematch-btn-group { display: flex; gap: 10px; justify-content: center; margin-top: 10px; }
+
+        #draw-offer-btn { background: #ff9f43; margin-top: 15px; width: 100%; max-width: 300px; padding: 8px;}
+        #draw-dialog { display: none; background: rgba(255, 159, 67, 0.2); border: 2px solid #ff9f43; padding: 15px; border-radius: 8px; margin: 15px auto; max-width: 400px; }
+        .draw-btn-group { display: flex; gap: 10px; justify-content: center; margin-top: 10px; }
+        .player-list { display: flex; justify-content: center; gap: 15px; margin-bottom: 10px; font-size: 0.9em;}
+    </style>
+</head>
+<body>
+
+    <h1>オンライン 同時プレイ コネクト4</h1>
+
+    <div id="login-screen" class="panel">
+        <h2>ゲームに参加</h2>
+        <input type="text" id="player-name" placeholder="プレイヤー名 (10文字以内)" maxlength="10"><br>
+        <select id="game-mode">
+            <option value="normal">通常モード</option>
+            <option value="blind">ブラインドモード（落下後消失）</option>
+        </select>
+        <br>
+        <button onclick="joinGame()">部屋に入る</button>
+    </div>
+
+    <div id="game-screen" style="display: none;">
+        <div class="panel">
+            <div id="status" style="font-size: 1.2em; font-weight: bold; margin-bottom: 5px;">接続中...</div>
+            <div id="mode-display" style="color:#eccc68; margin-bottom: 10px; font-weight:bold;"></div>
+            
+            <div class="player-list">
+                <span style="color:#ff4757;">P1: <span id="name-disp-1">待機中</span></span>
+                <span style="color:#ffa502;">P2: <span id="name-disp-2">待機中</span></span>
+                <span style="color:#1e90ff;">P3: <span id="name-disp-3">待機中</span></span>
+            </div>
+
+            <div>Turn: <span id="turn-disp" style="font-size: 1.2em; font-weight: bold;">1</span></div>
+            
+            <div class="priority-box">
+                <div style="margin-bottom: 5px;">現在の優先順位: <span id="current-priority"></span></div>
+                <div style="color: #a4b0be;">次の優先順位: <span id="next-priority"></span></div>
+            </div>
+        </div>
+
+        <div id="board"></div>
+
+        <div id="draw-dialog">
+            <div id="draw-msg" style="font-weight: bold; color: #ff9f43;"></div>
+            <div id="draw-actions" class="draw-btn-group">
+                <button onclick="socket.emit('respondDraw', true)" style="background: #2ed573;">承諾する</button>
+                <button onclick="socket.emit('respondDraw', false)" style="background: #ff4757;">拒否する</button>
+            </div>
+        </div>
+
+        <div id="controls">
+            <button id="commit-btn" disabled>列を選んで決定</button>
+            <div id="ready-players" class="ready-status">全員の入力を待っています...</div>
+            <button id="draw-offer-btn" onclick="sendDrawOffer()" style="display:none;">流局（引き分け）を提案</button>
+        </div>
+
+        <div id="rematch-area">
+            <div style="margin-bottom: 10px; font-weight: bold; font-size: 1.2em;" id="result-msg"></div>
+            <div class="rematch-btn-group">
+                <button onclick="socket.emit('requestReset', 'keep')" style="background: #a4b0be;">もう一度 (同じ手番)</button>
+                <button onclick="socket.emit('requestReset', 'shuffle')" style="background: #eccc68; color: #2f3542;">もう一度 (ランダム入れ替え)</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io();
+        let myPlayerNumber = null;
+        let selectedCol = null;
+        let hasSubmitted = false;
+        let isGameOver = false; 
+        
+        let serverDrawState = {1: false, 2: false, 3: false}; 
+        let playerNames = {1: "待機中", 2: "待機中", 3: "待機中"};
+        
+        let currentMode = 'normal'; // 現在のモード記憶用
+
+        const PRIORITY_PATTERNS = [[1, 2, 3], [3, 1, 2], [2, 3, 1]];
+        const COLORS = {1: '#ff4757', 2: '#ffa502', 3: '#1e90ff'};
+
+        function joinGame() {
+            const nameInput = document.getElementById('player-name').value.trim();
+            const name = nameInput || "名無し";
+            currentMode = document.getElementById('game-mode').value;
+            
+            document.getElementById('login-screen').style.display = 'none';
+            document.getElementById('game-screen').style.display = 'block';
+            
+            const modeText = currentMode === 'blind' ? "【ブラインドモード】" : "【通常モード】";
+            document.getElementById('mode-display').textContent = modeText;
+
+            socket.emit('joinGame', { name: name, mode: currentMode });
+        }
+
+        socket.on('assignPlayer', (num) => {
+            myPlayerNumber = num;
+            document.getElementById('status').textContent = `あなたは Player ${num} です`;
+            document.getElementById('status').className = `p${num}`;
+            if(!isGameOver) refreshDrawButton();
+            if(window.currentTurnData) updatePriorityDisplay(window.currentTurnData);
+        });
+
+        socket.on('spectator', () => { document.getElementById('status').textContent = "満室です。観戦モードになります。"; });
+
+        socket.on('updateNames', (names) => {
+            playerNames = names;
+            document.getElementById('name-disp-1').textContent = names[1];
+            document.getElementById('name-disp-2').textContent = names[2];
+            document.getElementById('name-disp-3').textContent = names[3];
+            if(window.currentTurnData) updatePriorityDisplay(window.currentTurnData);
+        });
+
+        function refreshDrawButton() {
+            if (!myPlayerNumber || isGameOver) {
+                document.getElementById('draw-offer-btn').style.display = 'none';
+                return;
+            }
+            const isUsed = serverDrawState[myPlayerNumber];
+            document.getElementById('draw-offer-btn').style.display = isUsed ? 'none' : 'inline-block';
+        }
+
+        socket.on('updateState', (data) => {
+            isGameOver = false; 
+            hasSubmitted = false;
+            selectedCol = null;
+            window.currentTurnData = data.turn; 
+            
+            document.getElementById('turn-disp').textContent = data.turn;
+            
+            document.getElementById('controls').style.display = 'block';
+            document.getElementById('rematch-area').style.display = 'none';
+            document.getElementById('draw-dialog').style.display = 'none';
+            document.getElementById('commit-btn').textContent = "決定して送信";
+            document.getElementById('commit-btn').disabled = true;
+            
+            if (data.hasOfferedDraw) serverDrawState = data.hasOfferedDraw;
+            refreshDrawButton();
+
+            // ★ 新しく lastMoves を渡して盤面を描画
+            drawBoard(data.board, data.lastMoves);
+            updateReadyStatus(data.readyPlayers);
+            updatePriorityDisplay(data.turn);
+        });
+
+        socket.on('playerReady', (readyPlayerNums) => { updateReadyStatus(readyPlayerNums); });
+
+        function sendDrawOffer() {
+            socket.emit('offerDraw');
+            document.getElementById('draw-offer-btn').style.display = 'none'; 
+        }
+
+        socket.on('drawOffered', (data) => {
+            document.getElementById('draw-dialog').style.display = 'block';
+            document.getElementById('draw-offer-btn').style.display = 'none';
+
+            if (data.initiator === myPlayerNumber) {
+                document.getElementById('draw-msg').textContent = "流局を提案しました。返答を待っています...";
+                document.getElementById('draw-actions').style.display = 'none';
+            } else {
+                const initiatorName = playerNames[data.initiator];
+                document.getElementById('draw-msg').textContent = `P${data.initiator}(${initiatorName}) が流局を提案しています。`;
+                document.getElementById('draw-actions').style.display = 'flex';
+            }
+        });
+
+        socket.on('drawAcceptedBy', (data) => {
+            if (data.accepter !== myPlayerNumber) {
+                const accepterName = playerNames[data.accepter];
+                document.getElementById('draw-msg').innerHTML += `<br><span style="color:#2ed573; font-size:0.9em;">(P${data.accepter}: ${accepterName} が承諾)</span>`;
+            } else {
+                document.getElementById('draw-actions').style.display = 'none';
+                document.getElementById('draw-msg').innerHTML += `<br>他のプレイヤーを待っています...`;
+            }
+        });
+
+        socket.on('drawRejected', (data) => {
+            document.getElementById('draw-dialog').style.display = 'none';
+            if (data.hasOfferedDraw) serverDrawState = data.hasOfferedDraw;
+            refreshDrawButton(); 
+
+            if (data.rejector !== 0) {
+                const rejectorName = playerNames[data.rejector];
+                setTimeout(() => alert(`P${data.rejector}(${rejectorName}) が流局を拒否しました。`), 50);
+            }
+        });
+
+        socket.on('gameOver', (data) => {
+            isGameOver = true; 
+            refreshDrawButton(); 
+
+            // ゲーム終了時はブラインドモードでも全盤面を公開する
+            const originalMode = currentMode;
+            currentMode = 'normal'; 
+            drawBoard(data.board, []);
+            currentMode = originalMode; // 元に戻す
+
+            const msgEl = document.getElementById('result-msg');
+            
+            if (data.reason === 'draw_agreed') {
+                msgEl.textContent = "全員の合意により、流局となりました。";
+                msgEl.style.color = "#ff9f43";
+            } else if (data.winner === 0) {
+                msgEl.textContent = "引き分け！";
+                msgEl.style.color = "#fff";
+            } else {
+                const winnerName = playerNames[data.winner];
+                msgEl.textContent = `Player ${data.winner} (${winnerName}) の勝利！`;
+                msgEl.style.color = COLORS[data.winner];
+            }
+            
+            document.getElementById('controls').style.display = 'none';
+            document.getElementById('draw-dialog').style.display = 'none';
+            document.getElementById('rematch-area').style.display = 'block';
+        });
+
+        // ==========================================
+        // ★ 盤面描画ロジック (ブラインド対応)
+        // ==========================================
+        function drawBoard(boardData, lastMoves = []) {
+            const boardDiv = document.getElementById('board');
+            boardDiv.innerHTML = '';
+            const isBlind = (currentMode === 'blind');
+
+            for (let r = 0; r < 9; r++) {
+                for (let c = 0; c < 9; c++) {
+                    const cell = document.createElement('div');
+                    cell.className = 'cell';
+                    const val = boardData[r][c];
+
+                    if (val !== 0) {
+                        cell.classList.add(`p${val}`);
+                        cell.textContent = val;
+
+                        // ブラインドモードの処理
+                        if (isBlind) {
+                            // 直前のターンに落とされたものかどうかをチェック
+                            const isNewlyDropped = lastMoves.some(m => m.r === r && m.c === c);
+                            
+                            if (isNewlyDropped) {
+                                // アニメーションを適用（上空で待機 -> 落下 -> 消える）
+                                cell.classList.add('blind-anim');
+                            } else {
+                                // 過去のディスクは透明にする
+                                cell.classList.add('blind-hidden');
+                                cell.textContent = ''; 
+                            }
+                        }
+                    }
+
+                    cell.onclick = () => {
+                        if (!myPlayerNumber || hasSubmitted || isGameOver) return;
+                        selectedCol = c;
+                        
+                        document.querySelectorAll('.cell').forEach(el => el.classList.remove('selected'));
+                        document.querySelectorAll('.ghost').forEach(el => {
+                            el.classList.remove('ghost');
+                            el.textContent = '';
+                        });
+
+                        // 選択された列を光らせる
+                        boardDiv.children[c].classList.add('selected'); 
+                        
+                        // ゴーストディスク（仮置き）の表示
+                        let dropR = -1;
+                        if (isBlind) {
+                            // ブラインドモードでは積み上がり具合を隠すため、常に一番上にゴーストを表示
+                            dropR = 0; 
+                        } else {
+                            for(let i=8; i>=0; i--) if(boardData[i][c]===0){ dropR=i; break; }
+                        }
+                        
+                        if (dropR !== -1) {
+                            const ghostCell = boardDiv.children[dropR * 9 + c];
+                            if(!ghostCell.classList.contains(`p${val}`)) { // すでに何か入ってない場合のみ
+                                ghostCell.classList.add('ghost');
+                                ghostCell.textContent = myPlayerNumber;
+                            }
+                        }
+
+                        document.getElementById('commit-btn').disabled = false;
+                    };
+                    boardDiv.appendChild(cell);
+                }
+            }
+        }
+
+        function updateReadyStatus(readyPlayers) {
+            if (readyPlayers.length === 0) document.getElementById('ready-players').textContent = "全員の入力を待っています...";
+            else document.getElementById('ready-players').textContent = `準備完了: ${readyPlayers.map(p => `P${p}`).join(', ')}`;
+        }
+
+        function updatePriorityDisplay(turn) {
+            const currentP = PRIORITY_PATTERNS[(turn - 1) % 3];
+            const nextP = PRIORITY_PATTERNS[turn % 3];
+            const formatPriority = (orderArray) => {
+                return orderArray.map(pNum => {
+                    const name = playerNames[pNum];
+                    const label = (pNum === myPlayerNumber) ? `P${pNum}(あなた)` : `P${pNum}(${name})`;
+                    return `<span class="prio-item" style="background-color: ${COLORS[pNum]};">${label}</span>`;
+                }).join('<span style="color:#7f8fa6; font-weight:bold;"> ＞ </span>');
+            };
+            document.getElementById('current-priority').innerHTML = formatPriority(currentP);
+            document.getElementById('next-priority').innerHTML = formatPriority(nextP);
+        }
+
+        document.getElementById('commit-btn').onclick = () => {
+            if (selectedCol !== null && !hasSubmitted) {
+                socket.emit('submitMove', selectedCol); 
+                hasSubmitted = true;
+                
+                // ゴーストを消す
+                document.querySelectorAll('.ghost').forEach(el => { el.classList.remove('ghost'); el.textContent = ''; });
+
+                document.getElementById('commit-btn').disabled = true;
+                document.getElementById('commit-btn').textContent = "他のプレイヤーを待機中...";
+            }
+        };
+    </script>
+</body>
+</html>
