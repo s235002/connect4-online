@@ -1,31 +1,39 @@
 <!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>オンライン 3人コネクト4</title>
     <style>
-        body { font-family: sans-serif; text-align: center; background-color: #2f3542; color: #fff; margin: 0; padding: 20px;}
-        .panel { background: #353b48; padding: 20px; border-radius: 8px; width: fit-content; margin: 0 auto 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.3);}
+        body { font-family: sans-serif; text-align: center; background-color: #2f3542; color: #fff; margin: 0; padding: 10px;}
+        .panel { background: #353b48; padding: 15px; border-radius: 8px; width: 100%; max-width: 500px; box-sizing: border-box; margin: 0 auto 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.3);}
         
         /* ログイン画面 */
-        #login-screen { margin-top: 100px; }
-        #login-screen input, #login-screen select { padding: 10px; font-size: 16px; border-radius: 4px; border: none; width: 220px; text-align: center; margin-bottom: 15px;}
+        #login-screen { margin-top: 50px; }
+        #login-screen input, #login-screen select { padding: 10px; font-size: 16px; border-radius: 4px; border: none; width: 80%; max-width: 250px; text-align: center; margin-bottom: 15px;}
         #login-screen select { cursor: pointer; }
         
+        /* ★修正：スマホ画面からはみ出さないように、自動で縮む盤面に変更 */
         #board {
-            display: grid; grid-template-columns: repeat(9, 40px); gap: 5px;
-            background-color: #57606f; padding: 10px; border-radius: 8px; margin: 0 auto; width: fit-content;
+            display: grid; grid-template-columns: repeat(9, 1fr); gap: 3px;
+            background-color: #57606f; padding: 8px; border-radius: 8px; 
+            margin: 0 auto; width: 100%; max-width: 450px; box-sizing: border-box;
+            min-height: 350px; /* ★追加: 読み込み中も潰れないようにする */
         }
         .cell {
-            width: 40px; height: 40px; background-color: #dfe4ea; border-radius: 50%;
+            width: 100%; aspect-ratio: 1; /* 常に正方形を維持する魔法 */
+            background-color: #dfe4ea; border-radius: 50%;
             display: flex; align-items: center; justify-content: center; font-weight: bold; color: #333; cursor: pointer;
-            position: relative; /* アニメーション用 */
+            position: relative; font-size: 14px;
         }
         
         .p1 { background-color: #ff4757; color: white; }
         .p2 { background-color: #ffa502; color: white; }
         .p3 { background-color: #1e90ff; color: white; }
         .selected { border: 3px solid #00d2d3; box-sizing: border-box; } 
+
+        /* ====== (これより下のCSSとJavaScriptは変更しなくて大丈夫です！) ====== */
 
         /* ==========================================
            ★ブラインドモード用の特殊CSSアニメーション
@@ -131,7 +139,7 @@
 
     <script src="/socket.io/socket.io.js"></script>
     <script>
-        const socket = io();
+        const socket = io({ transports: ['websocket', 'polling'] });
         let myPlayerNumber = null;
         let selectedCol = null;
         let hasSubmitted = false;

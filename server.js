@@ -9,31 +9,29 @@ const ROWS = 9;
 const COLS = 9;
 const PRIORITY_PATTERNS = [[1, 2, 3], [3, 1, 2], [2, 3, 1]];
 
-// ★ 部屋（モード）ごとに独立したゲーム状態を作るファクトリー関数
 function createGameState() {
     return {
-        players: {}, // { socketId: { num, name } }
+        players: {}, 
         availableSlots: [1, 2, 3],
         board: Array.from({length: ROWS}, () => Array(COLS).fill(0)),
         currentTurn: 1,
         submittedMoves: {},
         hasOfferedDraw: { 1: false, 2: false, 3: false },
         activeDrawOffer: null,
-        lastMoves: [] // ★追加: 落下アニメーション用に「直前のターンで誰がどこに落としたか」を記憶
+        lastMoves: [] 
     };
 }
 
-// 2つのモードの部屋を用意
 const games = {
     normal: createGameState(),
     blind: createGameState()
 };
 
-// どのソケットがどのモードにいるかを記憶
 let socketModes = {}; 
 
 function getPlayerNames(mode) {
     let names = { 1: "待機中", 2: "待機中", 3: "待機中" };
+    if (!games[mode]) return names;
     const game = games[mode];
     for (let sid in game.players) {
         names[game.players[sid].num] = game.players[sid].name;
@@ -43,59 +41,70 @@ function getPlayerNames(mode) {
 
 io.on('connection', (socket) => {
     
-    // --- ログイン・入室 ---
     socket.on('joinGame', (data) => {
-        const mode = data.mode;
-        const game = games[mode];
-        
-        socketModes[socket.id] = mode;
-        socket.join(mode); // Socket.ioのルーム機能で振り分け
+        try {
+            // ★古いスマホのキャッシュ対策：データ形式が古い場合は補正する
+            if (!data || typeof data === 'string') {
+                data = { name: data || "名無し", mode: 'normal' };
+            }
+            const mode = data.mode || 'normal';
+            const game = games[mode];
+            
+            if (!game) {
+                console.error("無効なモード:", mode);
+                return; // エラーでサーバーが止まるのを防ぐ
+            }
 
-        if (game.availableSlots.length > 0) {
-            const playerNum = game.availableSlots.shift();
-            game.players[socket.id] = { num: playerNum, name: data.name };
-            
-            socket.emit('assignPlayer', playerNum);
-            
-            // その部屋の人たちだけに送信
-            io.to(mode).emit('updateNames', getPlayerNames(mode));
-            socket.emit('updateState', { 
-                board: game.board, turn: game.currentTurn, 
-                readyPlayers: Object.keys(game.submittedMoves), 
-                hasOfferedDraw: game.hasOfferedDraw,
-                lastMoves: [] 
-            });
-        } else {
-            socket.emit('spectator');
-            socket.emit('updateNames', getPlayerNames(mode));
-            socket.emit('updateState', { board: game.board, turn: game.currentTurn, readyPlayers: Object.keys(game.submittedMoves), hasOfferedDraw: game.hasOfferedDraw, lastMoves: [] });
+            socketModes[socket.id] = mode;
+            socket.join(mode);
+
+            if (game.availableSlots.length > 0) {
+                const playerNum = game.availableSlots.shift();
+                game.players[socket.id] = { num: playerNum, name: data.name };
+                
+                socket.emit('assignPlayer', playerNum);
+                io.to(mode).emit('updateNames', getPlayerNames(mode));
+                socket.emit('updateState', { 
+                    board: game.board, turn: game.currentTurn, 
+                    readyPlayers: Object.keys(game.submittedMoves), 
+                    hasOfferedDraw: game.hasOfferedDraw,
+                    lastMoves: game.lastMoves || [] 
+                });
+            } else {
+                socket.emit('spectator');
+                socket.emit('updateNames', getPlayerNames(mode));
+                socket.emit('updateState', { board: game.board, turn: game.currentTurn, readyPlayers: Object.keys(game.submittedMoves), hasOfferedDraw: game.hasOfferedDraw, lastMoves: game.lastMoves || [] });
+            }
+        } catch (error) {
+            console.error("入室処理中にエラーが発生しました:", error);
         }
     });
 
-    // --- アクションの受信 ---
     socket.on('submitMove', (col) => {
-        const mode = socketModes[socket.id];
-        if(!mode) return;
-        const game = games[mode];
-        
-        if (!game.players[socket.id]) return;
-        const pNum = game.players[socket.id].num;
-        if (game.submittedMoves[pNum] !== undefined) return; 
+        try {
+            const mode = socketModes[socket.id];
+            if(!mode) return;
+            const game = games[mode];
+            
+            if (!game.players[socket.id]) return;
+            const pNum = game.players[socket.id].num;
+            if (game.submittedMoves[pNum] !== undefined) return; 
 
-        game.submittedMoves[pNum] = col;
-        io.to(mode).emit('playerReady', Object.keys(game.submittedMoves));
+            game.submittedMoves[pNum] = col;
+            io.to(mode).emit('playerReady', Object.keys(game.submittedMoves));
 
-        if (Object.keys(game.submittedMoves).length === 3) {
-            processTurn(mode);
+            if (Object.keys(game.submittedMoves).length === 3) {
+                processTurn(mode);
+            }
+        } catch (error) {
+            console.error("操作処理中にエラー:", error);
         }
     });
 
-    // --- 流局処理 ---
     socket.on('offerDraw', () => {
         const mode = socketModes[socket.id];
         if(!mode) return;
         const game = games[mode];
-
         if (!game.players[socket.id]) return;
         const pNum = game.players[socket.id].num;
         if (game.hasOfferedDraw[pNum] || game.activeDrawOffer) return;
@@ -109,7 +118,6 @@ io.on('connection', (socket) => {
         const mode = socketModes[socket.id];
         if(!mode) return;
         const game = games[mode];
-
         if (!game.players[socket.id] || !game.activeDrawOffer) return;
         const pNum = game.players[socket.id].num;
         if (game.activeDrawOffer.initiator === pNum || game.activeDrawOffer.accepted.includes(pNum)) return;
@@ -128,7 +136,6 @@ io.on('connection', (socket) => {
         }
     });
 
-    // --- リセット・シャッフル ---
     socket.on('requestReset', (shuffleMode) => {
         const mode = socketModes[socket.id];
         if(!mode) return;
@@ -156,11 +163,9 @@ io.on('connection', (socket) => {
             });
             io.to(mode).emit('updateNames', getPlayerNames(mode));
         }
-
         io.to(mode).emit('updateState', { board: game.board, turn: game.currentTurn, readyPlayers: [], hasOfferedDraw: game.hasOfferedDraw, lastMoves: [] });
     });
 
-    // --- 切断処理 ---
     socket.on('disconnect', () => {
         const mode = socketModes[socket.id];
         if(!mode) return;
@@ -194,13 +199,12 @@ function processTurn(mode) {
     for (let p in game.submittedMoves) movesArr.push({ id: parseInt(p), col: game.submittedMoves[p] });
     movesArr.sort((a, b) => priority.indexOf(a.id) - priority.indexOf(b.id));
 
-    game.lastMoves = []; // アニメーション用データをリセット
+    game.lastMoves = []; 
 
     movesArr.forEach(m => {
         for (let r = ROWS - 1; r >= 0; r--) {
             if (game.board[r][m.col] === 0) { 
                 game.board[r][m.col] = m.id; 
-                // ★どこに落ちたかを記録
                 game.lastMoves.push({ id: m.id, r: r, c: m.col });
                 break; 
             }
@@ -229,4 +233,6 @@ function checkWin(board) {
     return 0;
 }
 
-http.listen(3000, () => console.log('Server running on port 3000'));
+// ★ポート設定（前回の修正が反映されているか確認してください）
+const PORT = process.env.PORT || 3000;
+http.listen(PORT, () => console.log(`Server running on port ${PORT}`));
